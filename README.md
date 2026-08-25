@@ -70,7 +70,7 @@ paths, and ores-otel event fields.
 
 Cross-repository Cargo dependencies are immutable. This implementation pins
 `happy-wakey-interfaces` at
-`0f4c4bffa81c1e7d914281fc2056697a2f1a3020` and ores-otel logging at
+`d6278ec8f6b2263678728b147a32dff92d52d8c8` and ores-otel logging at
 `ca176fb6768a9750d262a536952268625ffd3a8a`. The versioned Shared Auth wire
 contract implemented by the fail-closed HTTPS adapter was finalized in
 `shared-auth-interfaces` at
