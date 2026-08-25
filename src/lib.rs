@@ -55,9 +55,23 @@ impl Config {
             !self.introspect_secret.is_empty(),
             "introspection secret is empty"
         );
+        let shared_auth = reqwest::Url::parse(&self.shared_auth_base)
+            .context("Shared Auth base URL is invalid")?;
         anyhow::ensure!(
-            self.shared_auth_base.starts_with("https://"),
+            shared_auth.scheme() == "https",
             "Shared Auth must use HTTPS"
+        );
+        anyhow::ensure!(
+            shared_auth.host_str().is_some(),
+            "Shared Auth host is missing"
+        );
+        anyhow::ensure!(
+            shared_auth.username().is_empty() && shared_auth.password().is_none(),
+            "Shared Auth base URL must not contain credentials"
+        );
+        anyhow::ensure!(
+            shared_auth.query().is_none() && shared_auth.fragment().is_none(),
+            "Shared Auth base URL must not contain a query or fragment"
         );
         Ok(())
     }
@@ -84,7 +98,7 @@ impl AppState {
                 config.shared_auth_audience.clone(),
                 config.introspect_secret.clone(),
             )
-            .context("build official Shared Auth client")?,
+            .context("build fail-closed Shared Auth client")?,
             telemetry: Arc::new(Logger::new(Options {
                 app_name: "happy-wakey-api-server".into(),
                 ..Options::default()
@@ -129,6 +143,17 @@ mod tests {
 
     use super::*;
 
+    fn config(shared_auth_base: &str) -> Config {
+        Config {
+            database_url: "postgres://localhost/happy_wakey".into(),
+            bind: "127.0.0.1:0".into(),
+            shared_auth_base: shared_auth_base.into(),
+            shared_auth_audience: "happy-wakey".into(),
+            introspect_secret: "test-only-service-secret".into(),
+            async_operations_enabled: false,
+        }
+    }
+
     fn test_router() -> Router {
         Router::new()
             .route("/", post(|Json(_): Json<Value>| async {}))
@@ -167,5 +192,18 @@ mod tests {
             .unwrap();
 
         assert_eq!(response.status(), StatusCode::OK);
+    }
+
+    #[test]
+    fn shared_auth_base_is_https_and_credential_free() {
+        assert!(config("https://auth.example.test").validate().is_ok());
+        assert!(config("http://auth.example.test").validate().is_err());
+        assert!(config("https://user:password@auth.example.test")
+            .validate()
+            .is_err());
+        assert!(config("https://auth.example.test?redirect=elsewhere")
+            .validate()
+            .is_err());
+        assert!(config("https://").validate().is_err());
     }
 }
