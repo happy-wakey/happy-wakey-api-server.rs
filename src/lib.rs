@@ -1,9 +1,13 @@
+pub mod async_operations;
 pub mod auth;
 pub mod entity;
 pub mod error;
 pub mod handlers;
+pub mod nats;
+pub mod operation;
 pub mod reducer;
 pub mod scheduler;
+pub mod tcp;
 
 use std::{env, sync::Arc};
 
@@ -13,7 +17,6 @@ use axum::{
     Router,
 };
 use next_loggers::{Logger, Options};
-use reqwest::redirect::Policy;
 use sea_orm::{Database, DatabaseConnection};
 use tower_http::trace::TraceLayer;
 
@@ -24,6 +27,7 @@ pub struct Config {
     pub shared_auth_base: String,
     pub shared_auth_audience: String,
     pub introspect_secret: String,
+    pub async_operations_enabled: bool,
 }
 
 impl Config {
@@ -39,6 +43,9 @@ impl Config {
                 .context("HAPPY_WAKEY_SHARED_AUTH_INTROSPECT_SECRET is required")?
                 .trim()
                 .to_owned(),
+            async_operations_enabled: env::var("HAPPY_WAKEY_NATS_URL")
+                .ok()
+                .is_some_and(|value| !value.trim().is_empty()),
         })
     }
 
@@ -60,6 +67,7 @@ pub struct AppState {
     pub db: DatabaseConnection,
     pub auth: auth::SharedAuth,
     pub telemetry: Arc<Logger>,
+    pub async_operations_enabled: bool,
 }
 
 impl AppState {
@@ -68,22 +76,19 @@ impl AppState {
         let db = Database::connect(&config.database_url)
             .await
             .context("connect to PostgreSQL/CockroachDB")?;
-        let http = reqwest::Client::builder()
-            .redirect(Policy::none())
-            .build()
-            .context("build Shared Auth client")?;
         Ok(Self {
             db,
             auth: auth::SharedAuth::new(
-                http,
                 config.shared_auth_base.clone(),
                 config.shared_auth_audience.clone(),
                 config.introspect_secret.clone(),
-            ),
+            )
+            .context("build official Shared Auth client")?,
             telemetry: Arc::new(Logger::new(Options {
                 app_name: "happy-wakey-api-server".into(),
                 ..Options::default()
             })),
+            async_operations_enabled: config.async_operations_enabled,
         })
     }
 }
@@ -99,6 +104,7 @@ pub fn router(state: AppState) -> Router {
             "/v1/occurrences/{occurrence_id}/transitions",
             post(handlers::transition_occurrence),
         )
+        .route("/v1/async-operations", post(async_operations::register))
         .route("/v1/sync/pull", get(handlers::pull_changes))
         .route("/v1/sync/push", post(handlers::push_changes))
         .layer(TraceLayer::new_for_http())

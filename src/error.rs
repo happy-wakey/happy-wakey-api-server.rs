@@ -11,6 +11,8 @@ pub enum ApiFailure {
     Unauthorized,
     #[error("Shared Auth unavailable")]
     AuthUnavailable,
+    #[error("service transport unavailable")]
+    ServiceUnavailable,
     #[error("not found")]
     NotFound,
     #[error("conflict: {0}")]
@@ -38,6 +40,9 @@ impl IntoResponse for ApiFailure {
         let (status, code, retryable) = match self {
             Self::Unauthorized => (StatusCode::UNAUTHORIZED, "unauthorized", false),
             Self::AuthUnavailable => (StatusCode::SERVICE_UNAVAILABLE, "auth_unavailable", true),
+            Self::ServiceUnavailable => {
+                (StatusCode::SERVICE_UNAVAILABLE, "service_unavailable", true)
+            }
             Self::NotFound => (StatusCode::NOT_FOUND, "not_found", false),
             Self::Conflict(_) => (StatusCode::CONFLICT, "conflict", false),
             Self::Invalid(_) => (StatusCode::UNPROCESSABLE_ENTITY, "invalid_request", false),
