@@ -1,16 +1,13 @@
 use std::{env, fs::File, io::BufReader, path::PathBuf, sync::Arc, time::Duration};
 
 use anyhow::{Context, Result};
-use bytes::Bytes;
-use futures_util::{SinkExt, StreamExt};
 use tokio::{
-    io::{AsyncRead, AsyncWrite},
+    io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt},
     net::{TcpListener, TcpStream},
     sync::{watch, Semaphore},
     time::timeout,
 };
 use tokio_rustls::{rustls, server::TlsStream, TlsAcceptor};
-use tokio_util::codec::{Framed, LengthDelimitedCodec};
 
 use crate::{operation, AppState};
 
@@ -113,37 +110,69 @@ impl TcpServer {
 }
 
 async fn serve_connection(
-    stream: TlsStream<TcpStream>,
+    mut stream: TlsStream<TcpStream>,
     state: AppState,
     config: &TcpServerConfig,
 ) -> Result<()> {
-    let mut framed = bounded_framed(stream, operation::MAX_REQUEST_BYTES);
     for _ in 0..config.max_requests_per_connection {
-        let Some(frame) = timeout(config.idle_timeout, framed.next())
-            .await
-            .context("persistent TLS connection idle timeout")?
-            .transpose()
-            .context("read length-delimited service operation")?
+        let Some(frame) = timeout(
+            config.idle_timeout,
+            read_frame(&mut stream, operation::MAX_REQUEST_BYTES),
+        )
+        .await
+        .context("persistent TLS connection idle timeout")?
+        .context("read length-delimited service operation")?
         else {
             return Ok(());
         };
         let response = operation::execute_bytes(&state, &frame).await;
-        framed
-            .send(Bytes::from(response))
-            .await
-            .context("write length-delimited service operation")?;
+        timeout(
+            config.idle_timeout,
+            write_frame(&mut stream, &response, operation::MAX_RESPONSE_BYTES),
+        )
+        .await
+        .context("persistent TLS response write timeout")?
+        .context("write length-delimited service operation")?;
     }
     Ok(())
 }
 
-fn bounded_framed<T>(stream: T, max_frame_length: usize) -> Framed<T, LengthDelimitedCodec>
+async fn read_frame<T>(stream: &mut T, maximum: usize) -> Result<Option<Vec<u8>>>
 where
-    T: AsyncRead + AsyncWrite,
+    T: AsyncRead + Unpin,
 {
-    LengthDelimitedCodec::builder()
-        .length_field_length(4)
-        .max_frame_length(max_frame_length)
-        .new_framed(stream)
+    let mut length = [0_u8; 4];
+    if let Err(error) = stream.read_exact(&mut length).await {
+        if error.kind() == std::io::ErrorKind::UnexpectedEof {
+            return Ok(None);
+        }
+        return Err(error).context("read frame length");
+    }
+    let length = u32::from_be_bytes(length) as usize;
+    anyhow::ensure!(length <= maximum, "frame exceeded its byte limit");
+    let mut payload = vec![0_u8; length];
+    stream
+        .read_exact(&mut payload)
+        .await
+        .context("read frame payload")?;
+    Ok(Some(payload))
+}
+
+async fn write_frame<T>(stream: &mut T, payload: &[u8], maximum: usize) -> Result<()>
+where
+    T: AsyncWrite + Unpin,
+{
+    anyhow::ensure!(payload.len() <= maximum, "frame exceeded its byte limit");
+    let length = u32::try_from(payload.len()).context("frame length exceeded u32")?;
+    stream
+        .write_all(&length.to_be_bytes())
+        .await
+        .context("write frame length")?;
+    stream
+        .write_all(payload)
+        .await
+        .context("write frame payload")?;
+    stream.flush().await.context("flush response frame")
 }
 
 fn load_tls_config(config: &TcpServerConfig) -> Result<rustls::ServerConfig> {
@@ -198,18 +227,34 @@ mod tests {
     use super::*;
 
     #[tokio::test]
-    async fn frame_codec_is_length_delimited_and_bounded() {
+    async fn frame_codec_has_asymmetric_request_and_response_bounds() {
         let (client, server) = tokio::io::duplex(1024);
-        let mut client = bounded_framed(client, 64);
-        let mut server = bounded_framed(server, 64);
-        client.send(Bytes::from_static(b"request")).await.unwrap();
-        assert_eq!(server.next().await.unwrap().unwrap(), b"request"[..]);
+        let mut client = client;
+        let mut server = server;
+        write_frame(&mut client, b"request", 64).await.unwrap();
+        assert_eq!(
+            read_frame(&mut server, 64).await.unwrap().unwrap(),
+            b"request"
+        );
 
         let (client, server) = tokio::io::duplex(1024);
-        let mut client = bounded_framed(client, 128);
-        let mut server = bounded_framed(server, 8);
-        client.send(Bytes::from_static(b"oversized")).await.unwrap();
-        assert!(server.next().await.unwrap().is_err());
+        let mut client = client;
+        let mut server = server;
+        write_frame(&mut client, b"oversized", 128).await.unwrap();
+        assert!(read_frame(&mut server, 8).await.is_err());
+
+        let response = vec![b'x'; operation::MAX_REQUEST_BYTES + 1];
+        let (mut client, mut server) = tokio::io::duplex(response.len() + 8);
+        write_frame(&mut client, &response, operation::MAX_RESPONSE_BYTES)
+            .await
+            .unwrap();
+        assert_eq!(
+            read_frame(&mut server, operation::MAX_RESPONSE_BYTES)
+                .await
+                .unwrap()
+                .unwrap(),
+            response
+        );
     }
 
     #[test]
