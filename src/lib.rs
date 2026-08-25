@@ -13,6 +13,7 @@ use std::{env, sync::Arc};
 
 use anyhow::{Context, Result};
 use axum::{
+    extract::DefaultBodyLimit,
     routing::{get, post},
     Router,
 };
@@ -107,6 +108,64 @@ pub fn router(state: AppState) -> Router {
         .route("/v1/async-operations", post(async_operations::register))
         .route("/v1/sync/pull", get(handlers::pull_changes))
         .route("/v1/sync/push", post(handlers::push_changes))
+        .layer(request_body_limit())
         .layer(TraceLayer::new_for_http())
         .with_state(state)
+}
+
+fn request_body_limit() -> DefaultBodyLimit {
+    DefaultBodyLimit::max(operation::MAX_REQUEST_BYTES)
+}
+
+#[cfg(test)]
+mod tests {
+    use axum::{
+        body::Body,
+        extract::Json,
+        http::{Request, StatusCode},
+    };
+    use serde_json::Value;
+    use tower::ServiceExt;
+
+    use super::*;
+
+    fn test_router() -> Router {
+        Router::new()
+            .route("/", post(|Json(_): Json<Value>| async {}))
+            .layer(request_body_limit())
+    }
+
+    #[tokio::test]
+    async fn request_body_limit_rejects_oversized_json_before_handlers() {
+        let body = format!(
+            "{{\"payload\":\"{}\"}}",
+            "x".repeat(operation::MAX_REQUEST_BYTES)
+        );
+        let response = test_router()
+            .oneshot(
+                Request::post("/")
+                    .header("content-type", "application/json")
+                    .body(Body::from(body))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::PAYLOAD_TOO_LARGE);
+    }
+
+    #[tokio::test]
+    async fn request_body_limit_allows_small_json() {
+        let response = test_router()
+            .oneshot(
+                Request::post("/")
+                    .header("content-type", "application/json")
+                    .body(Body::from(r#"{"payload":"ok"}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+    }
 }
