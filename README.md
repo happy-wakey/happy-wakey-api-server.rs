@@ -7,9 +7,10 @@ endpoints using Axum and SeaORM.
 ## Security and authority boundaries
 
 - Shared Auth is the sole identity authority. The API accepts only bounded
-  bearer credentials and introspects them over HTTPS with the official typed
-  client. The service credential is independent of the end-user bearer and is
-  never persisted or logged.
+  bearer credentials and introspects them through the canonical versioned
+  Shared Auth HTTPS contract with redirects disabled and bounded responses.
+  The service credential is independent of the end-user bearer and is never
+  persisted or logged.
 - Every customer-owned query is scoped to the verified Shared Auth subject.
 - The transition reducer is the sole occurrence-state authority. Stale or
   invalid transitions do not mutate the occurrence.
@@ -69,10 +70,10 @@ paths, and ores-otel event fields.
 
 Cross-repository Cargo dependencies are immutable. This implementation pins
 `happy-wakey-interfaces` at
-`0f4c4bffa81c1e7d914281fc2056697a2f1a3020`, the official Shared Auth client at
-`cc57a85b276bee81ad94decc87df2f48d49cab9f`, and ores-otel logging at
-`ca176fb6768a9750d262a536952268625ffd3a8a`. The Shared Auth wire contract used
-by that client was finalized in `shared-auth-interfaces` at
+`d6278ec8f6b2263678728b147a32dff92d52d8c8` and ores-otel logging at
+`ca176fb6768a9750d262a536952268625ffd3a8a`. The versioned Shared Auth wire
+contract implemented by the fail-closed HTTPS adapter was finalized in
+`shared-auth-interfaces` at
 `e60d862a59828a3690852252adcafaea1266268a`.
 
 ## Dependency and validation workflow

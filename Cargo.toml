@@ -15,16 +15,16 @@ bytes = "1"
 chrono = { version = "0.4", features = ["clock", "serde"] }
 chrono-tz = "0.10"
 futures-util = "0.3"
-happy-wakey-interfaces = { git = "https://github.com/happy-wakey/happy-wakey-interfaces.git", rev = "0f4c4bffa81c1e7d914281fc2056697a2f1a3020" }
+happy-wakey-interfaces = { git = "https://github.com/happy-wakey/happy-wakey-interfaces.git", rev = "d6278ec8f6b2263678728b147a32dff92d52d8c8" }
 hex = "0.4"
 next-loggers = { package = "oresoftware-next-loggers", git = "https://github.com/ores-otel/ores.otel.log.git", rev = "ca176fb6768a9750d262a536952268625ffd3a8a" }
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "stream"] }
 rustls-pemfile = "2"
 rust_decimal = { version = "1", features = ["serde"] }
 sea-orm = { version = "1.1", default-features = false, features = ["macros", "runtime-tokio-rustls", "sqlx-postgres", "with-chrono", "with-json", "with-rust_decimal", "with-uuid"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sha2 = "0.10"
-shared-auth-service-client = { git = "https://github.com/shared-auth/shared-auth-clients.git", rev = "cc57a85b276bee81ad94decc87df2f48d49cab9f" }
 thiserror = "2"
 tokio = { version = "1", features = ["io-util", "macros", "net", "rt-multi-thread", "signal", "sync", "time"] }
 tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "tls12"] }
