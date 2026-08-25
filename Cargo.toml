@@ -1,0 +1,33 @@
+[package]
+name = "happy-wakey-api-server"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.88"
+description = "Contract-first Happy Wakey JSON API backed by SeaORM"
+license = "MIT"
+repository = "https://github.com/happy-wakey/happy-wakey-api-server.rs"
+
+[dependencies]
+anyhow = "1"
+axum = { version = "0.8", features = ["macros"] }
+chrono = { version = "0.4", features = ["clock", "serde"] }
+chrono-tz = "0.10"
+happy-wakey-interfaces = { git = "https://github.com/happy-wakey/happy-wakey-interfaces.git", rev = "cb8d8128c7a3d50f813a05e68451c2e3b292c59c" }
+hex = "0.4"
+next-loggers = { package = "oresoftware-next-loggers", git = "https://github.com/ores-otel/ores.otel.log.git", rev = "ca176fb6768a9750d262a536952268625ffd3a8a" }
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+rust_decimal = { version = "1", features = ["serde"] }
+sea-orm = { version = "1.1", default-features = false, features = ["macros", "runtime-tokio-rustls", "sqlx-postgres", "with-chrono", "with-json", "with-rust_decimal", "with-uuid"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+thiserror = "2"
+tokio = { version = "1", features = ["macros", "net", "rt-multi-thread", "signal"] }
+tower-http = { version = "0.6", features = ["trace"] }
+uuid = { version = "1", features = ["serde", "v4"] }
+
+[dev-dependencies]
+tower = { version = "0.5", features = ["util"] }
+
+[lints.rust]
+unsafe_code = "forbid"

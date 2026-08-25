@@ -1,0 +1,53 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: happy-wakey-api-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  rust:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Verify Zed package contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --location --silent --show-error \
+            --output /tmp/zed.tar.gz \
+            https://github.com/zed-pkg/zed-cli/releases/download/v0.2.3/zed-x86_64-unknown-linux-gnu.tar.gz
+          echo 'b8f81a8e4943cbaeb47153386819a911dcf02666a8709c5bd013e4f35b1ba1b9  /tmp/zed.tar.gz' | sha256sum --check
+          tar -xzf /tmp/zed.tar.gz -C /tmp
+          /tmp/zed validate
+      - run: cargo fmt --all -- --check
+      - run: cargo test --locked
+      - run: cargo clippy --all-targets --locked -- -D warnings
+
+  repository-safety:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Reject conflict markers and plaintext environment files
+        shell: bash
+        run: |
+          set -euo pipefail
+          if git grep -nE '^(<<<<<<<|=======|>>>>>>>)'; then
+            exit 1
+          fi
+          if git ls-files | grep -E '(^|/)\.env($|\.)'; then
+            exit 1
+          fi

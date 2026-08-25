@@ -1,0 +1,7 @@
+/target/
+/.zed/
+/zed_modules/
+/.zpkg-pack/
+/.env
+*.pem
+*.key

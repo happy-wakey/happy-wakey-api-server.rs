@@ -1,0 +1,27 @@
+[package]
+org = "happy-wakey"
+name = "happy-wakey-api-server"
+version = "0.1.0"
+description = "Contract-first Happy Wakey JSON API backed by SeaORM"
+license = "MIT"
+keywords = ["alarms", "axum", "seaorm", "shared-auth", "sync"]
+
+[package.repository]
+vcs = "git"
+url = "https://github.com/happy-wakey/happy-wakey-api-server.rs"
+
+[dependencies]
+"happy-wakey/happy-wakey-interfaces" = "^0.1.0"
+"oresoftware/next-loggers-rust" = "^0.1.0"
+
+[publish]
+include_readme = true
+tag_format = "v{version}"
+exclude = [".env", ".env.*", "target/**", "tmp/**", "**/*.log", ".DS_Store"]
+
+[targets.repository]
+dir = "."
+adapter = "rust"
+
+[scripts]
+test = "cargo test --locked"
