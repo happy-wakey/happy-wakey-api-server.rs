@@ -13,6 +13,7 @@ url = "https://github.com/happy-wakey/happy-wakey-api-server.rs"
 [dependencies]
 "happy-wakey/happy-wakey-interfaces" = "^0.1.0"
 "oresoftware/next-loggers-rust" = "^0.1.0"
+"shared-auth/shared-auth-clients" = "^0.1.0"
 
 [publish]
 include_readme = true

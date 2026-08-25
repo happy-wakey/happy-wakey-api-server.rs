@@ -1,14 +1,12 @@
 use axum::http::HeaderMap;
-use serde::{Deserialize, Serialize};
+use shared_auth_service_client::{ClientError, SharedAuthClient};
 
 use crate::error::ApiFailure;
 
 #[derive(Clone)]
 pub struct SharedAuth {
-    http: reqwest::Client,
-    base: String,
+    client: SharedAuthClient,
     audience: String,
-    service_secret: String,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -17,83 +15,61 @@ pub struct Identity {
     pub roles: Vec<String>,
 }
 
-#[derive(Serialize)]
-struct Envelope<'a> {
-    contract: &'static str,
-    payload: IntrospectionRequest<'a>,
-}
-
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-struct IntrospectionRequest<'a> {
-    token: &'a str,
-    audience: &'a str,
-    required_scopes: [String; 0],
-}
-
-#[derive(Deserialize)]
-struct IntrospectionResponse {
-    active: bool,
-    #[serde(default)]
-    sub: String,
-    #[serde(default)]
-    roles: Vec<String>,
-}
-
 impl SharedAuth {
     pub fn new(
-        http: reqwest::Client,
         base: String,
         audience: String,
         service_secret: String,
-    ) -> Self {
-        Self {
-            http,
-            base,
+    ) -> Result<Self, ClientError> {
+        Ok(Self {
+            client: SharedAuthClient::try_new(base)?
+                .with_service_credential(service_secret)
+                .with_max_response_bytes(64 * 1024),
             audience,
-            service_secret,
-        }
+        })
     }
 
     pub async fn authenticate(&self, headers: &HeaderMap) -> Result<Identity, ApiFailure> {
         let token = bearer(headers).ok_or_else(ApiFailure::unauthorized)?;
-        let response = self
-            .http
-            .post(format!(
-                "{}/auth/introspect",
-                self.base.trim_end_matches('/')
-            ))
-            .bearer_auth(&self.service_secret)
-            .json(&Envelope {
-                contract: "IntrospectionRequest",
-                payload: IntrospectionRequest {
-                    token,
-                    audience: &self.audience,
-                    required_scopes: [],
-                },
-            })
-            .send()
-            .await
-            .map_err(|_| ApiFailure::auth_unavailable())?;
+        self.authenticate_token(token).await
+    }
 
-        if !response.status().is_success() {
-            return Err(if response.status() == reqwest::StatusCode::UNAUTHORIZED {
-                ApiFailure::unauthorized()
-            } else {
-                ApiFailure::auth_unavailable()
-            });
-        }
-        let result: IntrospectionResponse = response
-            .json()
+    /// Re-authenticate a bearer for every non-HTTP transport operation.
+    ///
+    /// Persistent connections and durable message delivery are transport
+    /// optimizations only; they never cache or confer identity.
+    pub async fn authenticate_token(&self, token: &str) -> Result<Identity, ApiFailure> {
+        let result = self
+            .client
+            .introspect_with_requirements(token, &self.audience, &[])
             .await
-            .map_err(|_| ApiFailure::auth_unavailable())?;
-        if !result.active || result.sub.trim().is_empty() {
+            .map_err(map_client_error)?;
+        let subject = result
+            .sub
+            .filter(|value| !value.trim().is_empty())
+            .ok_or_else(ApiFailure::unauthorized)?;
+        if !result.active {
             return Err(ApiFailure::unauthorized());
         }
         Ok(Identity {
-            subject: result.sub,
+            subject,
             roles: result.roles,
         })
+    }
+}
+
+fn map_client_error(error: ClientError) -> ApiFailure {
+    match error {
+        ClientError::Unauthorized | ClientError::InvalidInput(_) => ApiFailure::unauthorized(),
+        ClientError::MissingServiceCredential
+        | ClientError::InvalidBaseUrl
+        | ClientError::RequestTooLarge { .. }
+        | ClientError::ResponseTooLarge { .. }
+        | ClientError::Encode { .. }
+        | ClientError::Decode { .. }
+        | ClientError::Transport(_)
+        | ClientError::Status(_)
+        | ClientError::InsecureTransport(_) => ApiFailure::auth_unavailable(),
     }
 }
 
@@ -117,5 +93,8 @@ mod tests {
         assert_eq!(bearer(&headers), None);
         headers.insert("authorization", "Bearer abc".parse().unwrap());
         assert_eq!(bearer(&headers), Some("abc"));
+        let oversized = format!("Bearer {}", "x".repeat(16 * 1024 + 1));
+        headers.insert("authorization", oversized.parse().unwrap());
+        assert_eq!(bearer(&headers), None);
     }
 }

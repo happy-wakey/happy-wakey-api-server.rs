@@ -7,13 +7,44 @@ endpoints using Axum and SeaORM.
 ## Security and authority boundaries
 
 - Shared Auth is the sole identity authority. The API accepts only bounded
-  bearer credentials and introspects them over HTTPS with redirects disabled.
+  bearer credentials and introspects them over HTTPS with the official typed
+  client. The service credential is independent of the end-user bearer and is
+  never persisted or logged.
 - Every customer-owned query is scoped to the verified Shared Auth subject.
 - The transition reducer is the sole occurrence-state authority. Stale or
   invalid transitions do not mutate the occurrence.
 - Idempotency receipts and occurrence updates share one database transaction.
 - The service never performs schema migration or DDL at startup.
 - Secrets come from the runtime environment and must never be committed.
+
+## Web-to-API interaction modes
+
+The surrounding Happy Wakey system supports four deliberately distinct paths:
+
+1. Direct database reads run only through `happy-wakey-lib-core::ReadContext`.
+   That capability exposes subject-scoped reads and no write or raw-connection
+   escape hatch.
+2. Stateless HTTPS uses the normal Axum endpoints. Deployments must terminate
+   TLS before this service and forward the authorization header unchanged.
+3. Stateful TCP is optional and always uses TLS. It uses bounded four-byte
+   length-delimited frames, bounded connections, an idle timeout, and a request
+   limit. Every frame carries a bearer and is re-introspected; a connection
+   never caches identity.
+4. Async work uses JetStream, not Core NATS request/reply. The client first
+   registers an idempotent operation over authenticated HTTPS. The API stores
+   only the verified subject and operation in its database outbox. A
+   credential-free signal then enters a pre-provisioned file-backed work-queue
+   stream. The API commits the response, publishes it with a deterministic
+   message ID, waits for the JetStream publish acknowledgement, and only then
+   acknowledges the request. Redelivery therefore replays the stored response
+   without repeating the database read.
+
+The application validates the existing streams and durable consumer at
+startup; it does not create or mutate broker topology. Invalid signals and
+unknown operation IDs are terminated, while transient database failures are
+negatively acknowledged for bounded redelivery. Bearers and service
+credentials are excluded from the outbox, JetStream payloads, dead-letter
+paths, and ores-otel event fields.
 
 ## Runtime configuration
 
@@ -24,6 +55,25 @@ endpoints using Axum and SeaORM.
 | `HAPPY_WAKEY_API_BIND` | no | Listener address; defaults to `0.0.0.0:8080` |
 | `HAPPY_WAKEY_SHARED_AUTH_BASE` | no | HTTPS Shared Auth base URL |
 | `HAPPY_WAKEY_SHARED_AUTH_AUDIENCE` | no | Required token audience; defaults to `happy-wakey` |
+| `HAPPY_WAKEY_API_TCP_BIND` | no | Enables the persistent TLS listener |
+| `HAPPY_WAKEY_API_TCP_TLS_CERT` | with TCP | PEM certificate chain |
+| `HAPPY_WAKEY_API_TCP_TLS_KEY` | with TCP | PEM private key |
+| `HAPPY_WAKEY_API_TCP_MAX_CONNECTIONS` | no | Bounded concurrent connection limit |
+| `HAPPY_WAKEY_API_TCP_MAX_REQUESTS_PER_CONNECTION` | no | Reauthentication/frame limit |
+| `HAPPY_WAKEY_API_TCP_IDLE_TIMEOUT_SECONDS` | no | Per-frame idle timeout |
+| `HAPPY_WAKEY_NATS_URL` | no | Enables async processing; must use `tls://` |
+| `HAPPY_WAKEY_NATS_CREDENTIALS_FILE` | with NATS | NKey/JWT credentials file; URL credentials are rejected |
+| `HAPPY_WAKEY_NATS_REQUEST_STREAM` | no | Pre-provisioned request stream name |
+| `HAPPY_WAKEY_NATS_RESPONSE_STREAM` | no | Pre-provisioned response stream name |
+| `HAPPY_WAKEY_NATS_CONSUMER` | no | Pre-provisioned durable pull consumer name |
+
+Cross-repository Cargo dependencies are immutable. This implementation pins
+`happy-wakey-interfaces` at
+`0f4c4bffa81c1e7d914281fc2056697a2f1a3020`, the official Shared Auth client at
+`cc57a85b276bee81ad94decc87df2f48d49cab9f`, and ores-otel logging at
+`ca176fb6768a9750d262a536952268625ffd3a8a`. The Shared Auth wire contract used
+by that client was finalized in `shared-auth-interfaces` at
+`e60d862a59828a3690852252adcafaea1266268a`.
 
 ## Dependency and validation workflow
 

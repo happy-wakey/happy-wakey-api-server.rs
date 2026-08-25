@@ -13,8 +13,9 @@ use happy_wakey_interfaces::{
 use next_loggers::{json, Map};
 use rust_decimal::prelude::ToPrimitive;
 use sea_orm::{
-    sea_query::OnConflict, ActiveModelTrait, ActiveValue::Set, ColumnTrait, DatabaseTransaction,
-    EntityTrait, PaginatorTrait, QueryFilter, QueryOrder, QuerySelect, TransactionTrait,
+    sea_query::OnConflict, ActiveModelTrait, ActiveValue::Set, ColumnTrait, ConnectionTrait,
+    DatabaseTransaction, EntityTrait, PaginatorTrait, QueryFilter, QueryOrder, QuerySelect,
+    TransactionTrait,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -37,16 +38,24 @@ pub async fn list_alarms(
     headers: HeaderMap,
 ) -> Result<Json<Vec<Alarm>>, ApiFailure> {
     let identity = state.auth.authenticate(&headers).await?;
+    let alarms = list_alarms_for_subject(&state.db, &identity.subject).await?;
+    emit(&state, "alarm.list", StatusCode::OK, false);
+    Ok(Json(alarms))
+}
+
+pub(crate) async fn list_alarms_for_subject<C: ConnectionTrait>(
+    db: &C,
+    subject: &str,
+) -> Result<Vec<Alarm>, ApiFailure> {
     let alarms = alarm::Entity::find()
-        .filter(alarm::Column::OwnerId.eq(&identity.subject))
+        .filter(alarm::Column::OwnerId.eq(subject))
         .order_by_asc(alarm::Column::CreatedAt)
-        .all(&state.db)
+        .all(db)
         .await?
         .into_iter()
         .map(alarm_contract)
         .collect::<Result<_, _>>()?;
-    emit(&state, "alarm.list", StatusCode::OK, false);
-    Ok(Json(alarms))
+    Ok(alarms)
 }
 
 pub async fn create_alarm(
