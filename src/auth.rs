@@ -22,7 +22,9 @@ impl SharedAuth {
         service_secret: String,
     ) -> Result<Self, ClientError> {
         Ok(Self {
-            client: SharedAuthClient::try_new(base)?.with_service_credential(service_secret),
+            client: SharedAuthClient::try_new(base)?
+                .with_service_credential(service_secret)
+                .with_max_response_bytes(64 * 1024),
             audience,
         })
     }
