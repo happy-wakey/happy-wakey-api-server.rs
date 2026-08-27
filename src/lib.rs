@@ -37,7 +37,7 @@ impl Config {
             database_url: env::var("DATABASE_URL").context("DATABASE_URL is required")?,
             bind: env::var("HAPPY_WAKEY_API_BIND").unwrap_or_else(|_| "0.0.0.0:8080".into()),
             shared_auth_base: env::var("HAPPY_WAKEY_SHARED_AUTH_BASE")
-                .unwrap_or_else(|_| "https://auth.oresoftware.dev".into()),
+                .context("HAPPY_WAKEY_SHARED_AUTH_BASE is required")?,
             shared_auth_audience: env::var("HAPPY_WAKEY_SHARED_AUTH_AUDIENCE")
                 .unwrap_or_else(|_| "happy-wakey".into()),
             introspect_secret: env::var("HAPPY_WAKEY_SHARED_AUTH_INTROSPECT_SECRET")
@@ -58,8 +58,8 @@ impl Config {
         let shared_auth = reqwest::Url::parse(&self.shared_auth_base)
             .context("Shared Auth base URL is invalid")?;
         anyhow::ensure!(
-            shared_auth.scheme() == "https",
-            "Shared Auth must use HTTPS"
+            is_safe_https_service_url(&self.shared_auth_base),
+            "Shared Auth must use HTTPS to a DNS name, not a public IP"
         );
         anyhow::ensure!(
             shared_auth.host_str().is_some(),
@@ -75,6 +75,26 @@ impl Config {
         );
         Ok(())
     }
+}
+
+fn is_safe_https_service_url(raw: &str) -> bool {
+    let Ok(url) = url::Url::parse(raw) else {
+        return false;
+    };
+    if url.scheme() != "https" || url.username() != "" || url.password().is_some() {
+        return false;
+    }
+    let Some(host) = url.host_str() else {
+        return false;
+    };
+    let host = host
+        .strip_prefix('[')
+        .and_then(|inner| inner.strip_suffix(']'))
+        .unwrap_or(host);
+    if matches!(host, "127.0.0.1" | "localhost" | "::1") {
+        return true;
+    }
+    host.parse::<std::net::IpAddr>().is_err() && !host.contains(':')
 }
 
 #[derive(Clone)]
@@ -195,6 +215,7 @@ mod tests {
     }
 
     #[test]
+<<<<<<< HEAD
     fn shared_auth_base_is_https_and_credential_free() {
         assert!(config("https://auth.example.test").validate().is_ok());
         assert!(config("http://auth.example.test").validate().is_err());
@@ -205,5 +226,16 @@ mod tests {
             .validate()
             .is_err());
         assert!(config("https://").validate().is_err());
+=======
+    fn shared_auth_urls_fail_closed_without_public_ips() {
+        assert!(is_safe_https_service_url("https://auth.oresoftware.dev"));
+        assert!(!is_safe_https_service_url("http://auth.oresoftware.dev"));
+        assert!(!is_safe_https_service_url("https://98.90.186.114"));
+        assert!(!is_safe_https_service_url("https://[2001:db8::1]/"));
+        assert!(!is_safe_https_service_url(
+            "https://user:pass@auth.oresoftware.dev"
+        ));
+        assert!(is_safe_https_service_url("https://127.0.0.1/"));
+>>>>>>> 4615ec9 (Fail closed on Shared Auth URLs and reject server-owned sync documents.)
     }
 }

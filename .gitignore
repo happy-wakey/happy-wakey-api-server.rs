@@ -6,7 +6,6 @@
 *.pem
 *.key
 
-
 # BEGIN ores-sops dotenv policy
 *.env
 */*.env
