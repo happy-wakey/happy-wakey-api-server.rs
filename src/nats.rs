@@ -22,15 +22,16 @@ use crate::{
 };
 
 const MAX_SIGNAL_BYTES: usize = 4 * 1024;
-const DEFAULT_REQUEST_STREAM: &str = "HAPPY_WAKEY_OPERATIONS";
+const DEFAULT_REQUEST_STREAM: &str = "DD_WEB_API_REQUESTS";
 const DEFAULT_RESPONSE_STREAM: &str = "HAPPY_WAKEY_RESPONSES";
-const DEFAULT_CONSUMER: &str = "happy-wakey-api";
+const DEFAULT_CONSUMER: &str = "dd-web-api-happy-wakey";
+const IN_CLUSTER_NATS_URL: &str = "nats://dd-nats.messaging.svc.cluster.local:4222";
 const RETRY_DELAY: Duration = Duration::from_secs(2);
 
 #[derive(Clone, Debug)]
 pub struct JetStreamConfig {
     pub url: String,
-    pub credentials_path: PathBuf,
+    pub credentials_path: Option<PathBuf>,
     pub request_stream: String,
     pub response_stream: String,
     pub consumer: String,
@@ -43,7 +44,7 @@ impl JetStreamConfig {
         };
         let config = Self {
             url,
-            credentials_path: PathBuf::from(required_env("HAPPY_WAKEY_NATS_CREDENTIALS_FILE")?),
+            credentials_path: optional_env("HAPPY_WAKEY_NATS_CREDENTIALS_FILE").map(PathBuf::from),
             request_stream: optional_env("HAPPY_WAKEY_NATS_REQUEST_STREAM")
                 .unwrap_or_else(|| DEFAULT_REQUEST_STREAM.into()),
             response_stream: optional_env("HAPPY_WAKEY_NATS_RESPONSE_STREAM")
@@ -56,21 +57,40 @@ impl JetStreamConfig {
     }
 
     fn validate(&self) -> Result<()> {
+        let in_cluster = self.url == IN_CLUSTER_NATS_URL;
         anyhow::ensure!(
-            self.url.starts_with("tls://"),
-            "HAPPY_WAKEY_NATS_URL must use tls://"
+            self.url.starts_with("tls://") || in_cluster,
+            "HAPPY_WAKEY_NATS_URL must use tls:// or the in-cluster dd-nats URL"
         );
-        let authority = self
-            .url
-            .strip_prefix("tls://")
-            .context("NATS TLS URL is malformed")?
-            .split('/')
-            .next()
-            .unwrap_or_default();
-        anyhow::ensure!(
-            !authority.is_empty() && !authority.contains('@'),
-            "NATS credentials must come from the credentials file, not the URL"
-        );
+        if in_cluster {
+            let authority = self
+                .url
+                .strip_prefix("nats://")
+                .unwrap_or_default()
+                .split('/')
+                .next()
+                .unwrap_or_default();
+            anyhow::ensure!(
+                !authority.contains('@'),
+                "NATS credentials must come from the credentials file, not the URL"
+            );
+        } else {
+            let authority = self
+                .url
+                .strip_prefix("tls://")
+                .context("NATS TLS URL is malformed")?
+                .split('/')
+                .next()
+                .unwrap_or_default();
+            anyhow::ensure!(
+                !authority.is_empty() && !authority.contains('@'),
+                "NATS credentials must come from the credentials file, not the URL"
+            );
+            anyhow::ensure!(
+                self.credentials_path.is_some(),
+                "HAPPY_WAKEY_NATS_CREDENTIALS_FILE is required for tls:// NATS"
+            );
+        }
         for (name, value) in [
             ("request stream", &self.request_stream),
             ("response stream", &self.response_stream),
@@ -91,17 +111,24 @@ pub struct JetStreamWorker {
 impl JetStreamWorker {
     pub async fn connect(config: JetStreamConfig, state: AppState) -> Result<Self> {
         config.validate()?;
-        let options = ConnectOptions::with_credentials_file(&config.credentials_path)
-            .await
-            .context("load NATS credentials file")?
-            .require_tls(true)
+        let mut options = if let Some(path) = &config.credentials_path {
+            ConnectOptions::with_credentials_file(path)
+                .await
+                .context("load NATS credentials file")?
+        } else {
+            ConnectOptions::new()
+        };
+        if config.url.starts_with("tls://") {
+            options = options.require_tls(true);
+        }
+        let options = options
             .name("happy-wakey-api-server")
             .connection_timeout(Duration::from_secs(5))
             .subscription_capacity(512);
         let client = options
             .connect(config.url.clone())
             .await
-            .context("connect to NATS over TLS")?;
+            .context("connect to NATS")?;
         let context = jetstream::new(client);
 
         let request_stream = context
@@ -331,10 +358,6 @@ fn optional_env(name: &str) -> Option<String> {
         .filter(|value| !value.is_empty())
 }
 
-fn required_env(name: &str) -> Result<String> {
-    optional_env(name).with_context(|| format!("{name} is required when JetStream is enabled"))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -353,11 +376,19 @@ mod tests {
         assert!(!safe_topology_name("bad.name"));
         let config = JetStreamConfig {
             url: "nats://localhost:4222".into(),
-            credentials_path: PathBuf::from("unused.creds"),
+            credentials_path: Some(PathBuf::from("unused.creds")),
             request_stream: DEFAULT_REQUEST_STREAM.into(),
             response_stream: DEFAULT_RESPONSE_STREAM.into(),
             consumer: DEFAULT_CONSUMER.into(),
         };
         assert!(config.validate().is_err());
+        let in_cluster = JetStreamConfig {
+            url: IN_CLUSTER_NATS_URL.into(),
+            credentials_path: None,
+            request_stream: DEFAULT_REQUEST_STREAM.into(),
+            response_stream: DEFAULT_RESPONSE_STREAM.into(),
+            consumer: DEFAULT_CONSUMER.into(),
+        };
+        assert!(in_cluster.validate().is_ok());
     }
 }
