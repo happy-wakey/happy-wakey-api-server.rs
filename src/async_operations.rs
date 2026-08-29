@@ -19,7 +19,7 @@ use crate::{entity::async_operation, error::ApiFailure, handlers, operation, App
 pub const REQUEST_SCHEMA: &str = "happy-wakey.async-operation.request.v1";
 pub const ACCEPTED_SCHEMA: &str = "happy-wakey.async-operation.accepted.v1";
 pub const SIGNAL_SCHEMA: &str = "happy-wakey.async-operation.signal.v1";
-pub const REQUEST_SUBJECT: &str = "happy-wakey.operations";
+pub const REQUEST_SUBJECT: &str = "dd.remote.web_api.happy-wakey.request";
 pub const RESPONSE_SUBJECT_PREFIX: &str = "happy-wakey.responses";
 const OUTBOX_TTL: Duration = Duration::minutes(5);
 

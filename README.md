@@ -62,7 +62,7 @@ paths, and ores-otel event fields.
 | `HAPPY_WAKEY_API_TCP_MAX_CONNECTIONS` | no | Bounded concurrent connection limit |
 | `HAPPY_WAKEY_API_TCP_MAX_REQUESTS_PER_CONNECTION` | no | Reauthentication/frame limit |
 | `HAPPY_WAKEY_API_TCP_IDLE_TIMEOUT_SECONDS` | no | Per-frame idle timeout |
-| `HAPPY_WAKEY_NATS_URL` | no | Enables async processing; must use `tls://` |
+| `HAPPY_WAKEY_NATS_URL` | no | Enables async processing; `tls://` with creds, or in-cluster `nats://dd-nats.messaging.svc.cluster.local:4222` |
 | `HAPPY_WAKEY_NATS_CREDENTIALS_FILE` | with NATS | NKey/JWT credentials file; URL credentials are rejected |
 | `HAPPY_WAKEY_NATS_REQUEST_STREAM` | no | Pre-provisioned request stream name |
 | `HAPPY_WAKEY_NATS_RESPONSE_STREAM` | no | Pre-provisioned response stream name |
