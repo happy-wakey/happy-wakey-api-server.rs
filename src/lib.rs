@@ -1,3 +1,4 @@
+pub mod web_api_plane;
 pub mod async_operations;
 pub mod auth;
 pub mod entity;
@@ -131,6 +132,7 @@ impl AppState {
 pub fn router(state: AppState) -> Router {
     Router::new()
         .route("/healthz", get(handlers::health))
+            .route("/v1/data-plane/capabilities", axum::routing::get(|| async { axum::Json(crate::web_api_plane::capabilities()) }))
         .route(
             "/v1/alarms",
             get(handlers::list_alarms).post(handlers::create_alarm),
