@@ -1,5 +1,6 @@
 use anyhow::{Context, Result};
 use happy_wakey_api_server::{
+    flags,
     nats::{JetStreamConfig, JetStreamWorker},
     router,
     tcp::{TcpServer, TcpServerConfig},
@@ -14,6 +15,10 @@ use tokio::{
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    if let Some(output) = flags::process_control().map_err(std::io::Error::other)? {
+        print!("{output}");
+        return Ok(());
+    }
     let config = Config::from_env()?;
     let state = AppState::connect(&config).await?;
     let listener = TcpListener::bind(&config.bind)

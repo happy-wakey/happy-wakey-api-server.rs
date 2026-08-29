@@ -2,6 +2,7 @@ pub mod async_operations;
 pub mod auth;
 pub mod entity;
 pub mod error;
+pub mod flags;
 pub mod handlers;
 pub mod nats;
 pub mod operation;
@@ -9,7 +10,7 @@ pub mod reducer;
 pub mod scheduler;
 pub mod tcp;
 
-use std::{env, sync::Arc};
+use std::sync::Arc;
 
 use anyhow::{Context, Result};
 use axum::{
@@ -34,17 +35,17 @@ pub struct Config {
 impl Config {
     pub fn from_env() -> Result<Self> {
         Ok(Self {
-            database_url: env::var("DATABASE_URL").context("DATABASE_URL is required")?,
-            bind: env::var("HAPPY_WAKEY_API_BIND").unwrap_or_else(|_| "0.0.0.0:8080".into()),
-            shared_auth_base: env::var("HAPPY_WAKEY_SHARED_AUTH_BASE")
+            database_url: flags::var("DATABASE_URL").context("DATABASE_URL is required")?,
+            bind: flags::var("HAPPY_WAKEY_API_BIND").unwrap_or_else(|_| "0.0.0.0:8080".into()),
+            shared_auth_base: flags::var("HAPPY_WAKEY_SHARED_AUTH_BASE")
                 .context("HAPPY_WAKEY_SHARED_AUTH_BASE is required")?,
-            shared_auth_audience: env::var("HAPPY_WAKEY_SHARED_AUTH_AUDIENCE")
+            shared_auth_audience: flags::var("HAPPY_WAKEY_SHARED_AUTH_AUDIENCE")
                 .unwrap_or_else(|_| "happy-wakey".into()),
-            introspect_secret: env::var("HAPPY_WAKEY_SHARED_AUTH_INTROSPECT_SECRET")
+            introspect_secret: flags::var("HAPPY_WAKEY_SHARED_AUTH_INTROSPECT_SECRET")
                 .context("HAPPY_WAKEY_SHARED_AUTH_INTROSPECT_SECRET is required")?
                 .trim()
                 .to_owned(),
-            async_operations_enabled: env::var("HAPPY_WAKEY_NATS_URL")
+            async_operations_enabled: flags::var("HAPPY_WAKEY_NATS_URL")
                 .ok()
                 .is_some_and(|value| !value.trim().is_empty()),
         })

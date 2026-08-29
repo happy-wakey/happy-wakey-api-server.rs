@@ -1,4 +1,4 @@
-use std::{env, path::PathBuf, time::Duration};
+use std::{path::PathBuf, time::Duration};
 
 use anyhow::{Context, Result};
 use async_nats::{
@@ -352,7 +352,7 @@ fn safe_topology_name(value: &str) -> bool {
 }
 
 fn optional_env(name: &str) -> Option<String> {
-    env::var(name)
+    crate::flags::var(name)
         .ok()
         .map(|value| value.trim().to_owned())
         .filter(|value| !value.is_empty())
