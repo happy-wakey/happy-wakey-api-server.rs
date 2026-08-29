@@ -327,6 +327,15 @@ pub async fn push_changes(
                 "scope and actor_id must equal the Shared Auth subject".into(),
             ));
         }
+        match change.document.as_ref() {
+            Some(document) => reject_server_owned_sync_document(document)?,
+            None if change.operation == ChangeOperation::Delete => {}
+            None => {
+                return Err(ApiFailure::Invalid(
+                    "upsert documents must be JSON objects".into(),
+                ));
+            }
+        }
         let active = sync_change::ActiveModel {
             sequence: sea_orm::ActiveValue::NotSet,
             change_id: Set(parse_uuid("change_id", &change.change_id)?),
@@ -511,6 +520,35 @@ fn change_contract(model: sync_change::Model) -> Result<SyncChange, ApiFailure> 
     })
 }
 
+fn reject_server_owned_sync_document(document: &Value) -> Result<(), ApiFailure> {
+    const FORBIDDEN: &[&str] = &[
+        "access_token",
+        "audit",
+        "factor",
+        "owner_id",
+        "permission",
+        "refresh_token",
+        "revocation",
+        "role",
+        "session",
+        "subject",
+        "token",
+    ];
+    let Some(object) = document.as_object() else {
+        return Err(ApiFailure::Invalid(
+            "sync documents must be JSON objects".into(),
+        ));
+    };
+    for field in FORBIDDEN {
+        if object.contains_key(*field) {
+            return Err(ApiFailure::Invalid(format!(
+                "field is server-owned and cannot be synchronized: {field}"
+            )));
+        }
+    }
+    Ok(())
+}
+
 fn parse_state(value: &str) -> Result<AlarmOccurrenceState, ApiFailure> {
     match value {
         "scheduled" => Ok(AlarmOccurrenceState::Scheduled),
@@ -584,4 +622,18 @@ fn emit(state: &AppState, operation: &str, status: StatusCode, failed: bool) {
         .add_fields(fields)
         .add_tags(["happy-wakey", "api"])
         .send();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn sync_documents_cannot_carry_server_owned_fields() {
+        assert!(reject_server_owned_sync_document(&json!({"theme": "dark"})).is_ok());
+        assert!(reject_server_owned_sync_document(&json!({"token": "secret"})).is_err());
+        assert!(reject_server_owned_sync_document(&json!({"subject": "user-1"})).is_err());
+        assert!(reject_server_owned_sync_document(&json!("not-an-object")).is_err());
+    }
 }
