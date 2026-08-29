@@ -215,18 +215,6 @@ mod tests {
     }
 
     #[test]
-<<<<<<< HEAD
-    fn shared_auth_base_is_https_and_credential_free() {
-        assert!(config("https://auth.example.test").validate().is_ok());
-        assert!(config("http://auth.example.test").validate().is_err());
-        assert!(config("https://user:password@auth.example.test")
-            .validate()
-            .is_err());
-        assert!(config("https://auth.example.test?redirect=elsewhere")
-            .validate()
-            .is_err());
-        assert!(config("https://").validate().is_err());
-=======
     fn shared_auth_urls_fail_closed_without_public_ips() {
         assert!(is_safe_https_service_url("https://auth.oresoftware.dev"));
         assert!(!is_safe_https_service_url("http://auth.oresoftware.dev"));
@@ -236,6 +224,17 @@ mod tests {
             "https://user:pass@auth.oresoftware.dev"
         ));
         assert!(is_safe_https_service_url("https://127.0.0.1/"));
->>>>>>> 4615ec9 (Fail closed on Shared Auth URLs and reject server-owned sync documents.)
+
+        assert!(config("https://auth.example.test").validate().is_ok());
+        assert!(config("http://auth.example.test").validate().is_err());
+        assert!(config("https://user:password@auth.example.test")
+            .validate()
+            .is_err());
+        assert!(config("https://auth.example.test?redirect=elsewhere")
+            .validate()
+            .is_err());
+        assert!(config("https://").validate().is_err());
+        assert!(config("https://98.90.186.114").validate().is_err());
+        assert!(config("https://[2001:db8::1]/").validate().is_err());
     }
 }
