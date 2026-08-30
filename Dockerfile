@@ -1,63 +1,233 @@
-# syntax=docker/dockerfile:1
+# syntax=docker/dockerfile:1.7
 #
-# Multi-stage image for happy-wakey-api-server.
-# Prefer linux/arm64:
-#   docker buildx build --platform linux/arm64 -t happy-wakey-api-server:dev .
-#   docker run --rm --platform linux/arm64 \
-#     -e SOPS_AGE_KEY="$(cat ~/.config/sops/age/keys.txt)" happy-wakey-api-server:dev
+# happy-wakey-api-server — production container image.
 #
-# ores-sops (https://github.com/ORESoftware/ores-sops):
-#   env/enc/dev.env.enc and env/enc/prod.env.enc — ciphertext, committed
-#   env/dec/<name>.env — plaintext, gitignored
-# Decrypt at `docker run`, never at `docker build`. Age key via SOPS_AGE_KEY
-# or SOPS_AGE_KEY_FILE. Orchestrator env (including OTEL_*) wins over secrets.
+# Multi-stage. The toolchain stage is well over a gigabyte; nothing from it
+# reaches the runtime stage except one stripped binary, so the published image
+# is debian:bookworm-slim plus that binary plus sops.
 #
-# ores-otel (https://github.com/ores-otel):
-#   The app exports OTLP in-process. Default collector is
-#   dd-otel-collector.observability.svc.cluster.local (HTTP/protobuf :4318).
-#   Wrong port silently drops spans. Do not EXPOSE 4317/4318.
-#   The *-sidecar.rs image is a separate loopback probe helper on
-#   127.0.0.1:9090 — do not bake it into this image, do not publish :9090.
+# BUILD
+#
+#   # arm64 is the default target. Both clusters are aarch64 — Graviton on the
+#   # AWS/EC2 side, CAX on Hetzner — and building natively there is markedly
+#   # faster than emulating amd64 through QEMU. Nothing here is arm-specific:
+#   # pass a --platform list for a multi-arch index.
+#   docker buildx build --platform linux/arm64 -t ghcr.io/happy-wakey/happy-wakey-api-server:dev --load .
+#
+#   # This crate resolves 3 dependencies from git remotes. If any of them is
+#   # private, pass a token as a BuildKit secret. It is tmpfs-mounted for the
+#   # duration of one RUN and applied through process-scoped GIT_CONFIG_*
+#   # variables, so it is never written to ~/.gitconfig and never lands in a
+#   # layer or in `docker history` — unlike --build-arg.
+#   GH_TOKEN="$(gh auth token)" docker buildx build \
+#     --platform linux/arm64 --secret id=gh_token,env=GH_TOKEN \
+#     -t ghcr.io/happy-wakey/happy-wakey-api-server:dev --load .
+#
+#   # OCI image index with provenance and SBOM attestations:
+#   docker buildx build --platform linux/arm64 --push \
+#     --provenance=true --sbom=true \
+#     --output type=image,oci-mediatypes=true,name=ghcr.io/happy-wakey/happy-wakey-api-server:dev .
+#
+#   `just docker-build` / `just docker-run` / `just docker-push` wrap all three.
+#
+# DEPENDENCIES — <function dep_note at 0xebdfad9225f0>
+#
+# SECRETS — see the block above ENTRYPOINT, and ORESoftware/ores-sops
+# docs/consumer-boundary.md. Nothing is decrypted at build time.
 
-############################
-# Stage 1 — build + strip
-############################
-FROM rust:1.88.0-bookworm AS build
-ARG TARGETARCH
-WORKDIR /src
+########################################
+# Stage A — zed-pkg dependency install
+########################################
+# ghcr.io/zed-pkg/zed-oci:0.2.2 is the org's package manager in a builder image
+# (zed-pkg/zed-oci). It resolves the 2 dependencies this project declares in
+# .zpkg.toml from the registry, by pinned SHA-256, with no git credentials
+# involved at all.
+#
+# --install-mode copy is required at a container boundary. The default symlink
+# mode points into Zed's content-addressed store, and those links dangle the
+# moment the tree crosses into a stage that has no store. Copy mode materializes
+# independent bytes that survive the COPY.
+# NOTE: no .zpkg.lock is tracked here, so this install resolves afresh on
+# every build and cannot pass --frozen. Commit a lock and add --frozen so the
+# image is reproducible and drift fails the build instead of being absorbed.
+FROM ghcr.io/zed-pkg/zed-oci:0.2.2 AS zpkg
+WORKDIR /workspace
+COPY --chown=10001:10001 .zpkg.toml ./
+RUN --mount=type=cache,target=/home/zed/.zed-pkg,uid=10001,gid=10001 \
+    zed install --install-mode copy --adapter rust
+
+########################################
+# Stage 0 — toolchain and cargo-chef
+########################################
+FROM rust:1.88-bookworm AS chef
+# git: dependencies are resolved from git remotes.
+# cmake, build-essential, perl: aws-lc-sys and ring, pulled in by rustls, build
+# native code. pkg-config and libssl-dev cover any transitive openssl-sys.
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends \
+      git ca-certificates pkg-config libssl-dev build-essential cmake perl \
+ && rm -rf /var/lib/apt/lists/*
+WORKDIR /app
+RUN --mount=type=cache,target=/usr/local/cargo/registry,id=cargo-registry,sharing=locked \
+    cargo install cargo-chef --locked
+
+########################################
+# Stage 1 — plan: derive the dependency recipe
+########################################
+FROM chef AS planner
 COPY . .
+RUN cargo chef prepare --recipe-path recipe.json
+
+########################################
+# Stage 2 — build
+########################################
+FROM chef AS builder
+COPY --from=planner /app/recipe.json recipe.json
+
+# (1) Compile ONLY the dependency graph. This layer is keyed on recipe.json —
+#     that is, on the manifests — so a source-only change reuses it. Because
+#     /app/target is a real directory here and not a --mount=type=cache, the
+#     compiled dependencies are baked into the layer and survive a cold CI
+#     runner, which a host-local BuildKit cache does not. That matters directly
+#     to the GitHub Actions minutes budget.
 RUN --mount=type=cache,target=/usr/local/cargo/registry,id=cargo-registry,sharing=locked \
     --mount=type=cache,target=/usr/local/cargo/git,id=cargo-git,sharing=locked \
-    --mount=type=cache,target=/src/target,id=happy-wakey-api-server-target-${TARGETARCH},sharing=locked \
-    cargo build --release --locked --bin happy-wakey-api-server \
-    && strip "target/release/happy-wakey-api-server" \
-    && cp "target/release/happy-wakey-api-server" "/usr/local/bin/happy-wakey-api-server"
+    --mount=type=secret,id=gh_token \
+    set -eu; \
+    if [ -s /run/secrets/gh_token ]; then \
+      t="$(cat /run/secrets/gh_token)"; \
+      export GIT_CONFIG_COUNT=2; \
+      export GIT_CONFIG_KEY_0="url.https://x-access-token:${t}@github.com/.insteadOf"; \
+      export GIT_CONFIG_VALUE_0="https://github.com/"; \
+      export GIT_CONFIG_KEY_1="url.https://x-access-token:${t}@github.com/.insteadOf"; \
+      export GIT_CONFIG_VALUE_1="ssh://git@github.com/"; \
+    fi; \
+    cargo chef cook --release --locked --recipe-path recipe.json
 
-############################
-# Stage 2 — slim runtime + sops
-############################
-FROM debian:bookworm-slim AS runtime
-ARG SOPS_ENV=prod
-RUN apt-get update \
-    && apt-get install --yes --no-install-recommends ca-certificates \
-    && apt-get clean \
-    && find /var/lib/apt/lists -mindepth 1 -delete \
-    && useradd --system --uid 65532 --no-create-home --shell /usr/sbin/nologin app
-COPY --from=build "/usr/local/bin/happy-wakey-api-server" "/usr/local/bin/happy-wakey-api-server"
-COPY --from=ghcr.io/getsops/sops:v3.10.2-alpine --chmod=0755 /usr/local/bin/sops /usr/local/bin/sops
-COPY --chmod=0755 scripts/sops-entrypoint.sh /usr/local/bin/sops-entrypoint.sh
-# Ciphertext is optional. Bind-mount the repo so a missing env/enc does not
-# fail the build; when present it is renamed to .env so sops can infer dotenv.
-RUN --mount=type=bind,source=.,target=/src,ro \
-    mkdir -p /app/secrets \
-    && if [ -f /src/env/enc/${SOPS_ENV}.env.enc ]; then \
-         cp "/src/env/enc/${SOPS_ENV}.env.enc" /app/secrets/app.env; \
-       fi \
-    && chown -R 65532:65532 /app /usr/local/bin/happy-wakey-api-server
-ENV SOPS_SECRETS_FILE=/app/secrets/app.env \
-    OTEL_SERVICE_NAME=happy-wakey-api-server \
-    OTEL_EXPORTER_OTLP_ENDPOINT=http://dd-otel-collector.observability.svc.cluster.local:4318 \
-    RUST_LOG=info
-USER 65532:65532
+# (2) Bring in the real source and compile just this crate against the cooked
+#     dependency artifacts already in /app/target.
+COPY . .
+
+# Bring in what zed-pkg resolved. Its Rust adapter emits .zed/cargo-paths.toml —
+# a `paths = [...]` fragment plus [patch.crates-io] entries — because cargo has
+# no environment-variable path override; merging that fragment is how the
+# dependency graph reaches cargo, and Cargo.toml is left untouched.
+#
+# The fragment goes FIRST: `paths` is a top-level key and TOML requires those to
+# precede every table, so appending it after an existing [net] section would
+# silently make it a member of that table instead.
+#
+# This runs after the source COPY, not before the chef cook, so a repository's
+# own .cargo/config.toml is present to merge with. The cook step therefore
+# precompiles only the registry graph, which is what it is for.
+COPY --from=zpkg /workspace/.vendor ./.vendor
+COPY --from=zpkg /workspace/.zed ./.zed
+RUN set -eu; \
+    mkdir -p .cargo; \
+    if [ -f .zed/cargo-paths.toml ]; then \
+      { cat .zed/cargo-paths.toml; \
+        if [ -f .cargo/config.toml ]; then cat .cargo/config.toml; fi; } \
+        > .cargo/config.toml.zed; \
+      mv .cargo/config.toml.zed .cargo/config.toml; \
+    fi
+RUN --mount=type=cache,target=/usr/local/cargo/registry,id=cargo-registry,sharing=locked \
+    --mount=type=cache,target=/usr/local/cargo/git,id=cargo-git,sharing=locked \
+    --mount=type=secret,id=gh_token \
+    set -eu; \
+    if [ -s /run/secrets/gh_token ]; then \
+      t="$(cat /run/secrets/gh_token)"; \
+      export GIT_CONFIG_COUNT=2; \
+      export GIT_CONFIG_KEY_0="url.https://x-access-token:${t}@github.com/.insteadOf"; \
+      export GIT_CONFIG_VALUE_0="https://github.com/"; \
+      export GIT_CONFIG_KEY_1="url.https://x-access-token:${t}@github.com/.insteadOf"; \
+      export GIT_CONFIG_VALUE_1="ssh://git@github.com/"; \
+    fi; \
+    cargo build --release --locked --bin happy-wakey-api-server; \
+    strip target/release/happy-wakey-api-server; \
+    cp target/release/happy-wakey-api-server /usr/local/bin/happy-wakey-api-server
+
+########################################
+# Stage 3 — distroless runtime (opt-in: --target runtime-distroless)
+########################################
+# Smaller than the default stage and carries no shell or package manager at
+# all. The trade-off is that nothing in it can run sops, so this variant cannot
+# decrypt anything itself: the environment has to arrive already-plaintext, from
+# a Kubernetes env-from-secret or a host-side `sops exec-env` / `--env-file`
+# injection. Use it where the platform owns the secret store outright.
+FROM gcr.io/distroless/cc-debian12:nonroot AS runtime-distroless
+COPY --from=builder --chown=65532:65532 /usr/local/bin/happy-wakey-api-server /usr/local/bin/happy-wakey-api-server
+ENV HAPPY_WAKEY_API_BIND=0.0.0.0:8080
 EXPOSE 8080
-ENTRYPOINT ["/usr/local/bin/sops-entrypoint.sh", "/usr/local/bin/happy-wakey-api-server"]
+USER 65532:65532
+ENTRYPOINT ["/usr/local/bin/happy-wakey-api-server"]
+
+########################################
+# Stage 4 — runtime (default)
+########################################
+FROM debian:bookworm-slim AS runtime
+# ca-certificates: rustls and sea-orm need the system trust store to reach
+# Postgres, Supabase and any upstream over TLS. libssl3 covers a transitive
+# openssl-sys that links dynamically.
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends ca-certificates libssl3 \
+ && apt-get clean && rm -rf /var/lib/apt/lists/*
+
+# sops, copied from its own published multi-arch image rather than curled and
+# checksummed: the right architecture is selected automatically for whatever
+# --platform this image is built for, and there is no per-arch SHA table to keep
+# current. sops is a static Go binary, so the alpine-built one runs here.
+COPY --chmod=0755 --from=ghcr.io/getsops/sops:v3.10.2-alpine /usr/local/bin/sops /usr/local/bin/sops
+COPY --chmod=0755 scripts/sops-entrypoint.sh /usr/local/bin/sops-entrypoint.sh
+COPY --from=builder /usr/local/bin/happy-wakey-api-server /usr/local/bin/happy-wakey-api-server
+
+# The service already binds a wildcard address by default. This pins the port so
+# EXPOSE, the Service targetPort and the probes cannot drift apart.
+ENV HAPPY_WAKEY_API_BIND=0.0.0.0:8080 \
+    SOPS_SECRETS_FILE=/run/secrets/app.env \
+    HOME=/tmp
+EXPOSE 8080
+
+# Kubernetes probes (this image ships no HEALTHCHECK on purpose: kubelet
+# ignores it, and honouring it would pull curl into every runtime image for
+# nothing). Put these on the Deployment instead:
+#
+#   livenessProbe:  { httpGet: { path: /healthz, port: 8080 } }
+#   readinessProbe: { httpGet: { path: /healthz, port: 8080 } }
+
+# --- ores-sops: decrypt at `docker run`, never at `docker build` -------------
+#
+# The image ships the sops binary and nothing else secret-shaped. Both halves
+# arrive at run time, which is what makes one image valid in every environment:
+#
+#   ciphertext -> $SOPS_SECRETS_FILE   (default /run/secrets/app.env)
+#   age key    -> $SOPS_AGE_KEY, or a file at $SOPS_AGE_KEY_FILE
+#
+# Local, against the repository's own encrypted dev profile:
+#
+#   docker run --rm -p 8080:8080 \
+#     -v "$PWD/env/enc/dev.env.enc:/run/secrets/app.env:ro" \
+#     -e SOPS_AGE_KEY="$(cat ~/.config/sops/age/keys.txt)" \
+#     ghcr.io/happy-wakey/happy-wakey-api-server:dev
+#
+# Kubernetes — project the ciphertext from a Secret or ConfigMap and supply the
+# key from a Secret. Prefer the file form for the key: an environment variable
+# is visible to anyone who can read the pod spec or run `docker inspect`,
+# whereas a projected Secret lands on tmpfs.
+#
+#   volumeMounts:
+#     - { name: sops-enc, mountPath: /run/secrets/app.env, subPath: app.env, readOnly: true }
+#     - { name: sops-age, mountPath: /run/secrets/age, readOnly: true }
+#   env:
+#     - { name: SOPS_AGE_KEY_FILE, value: /run/secrets/age/key }
+#     - { name: SOPS_REQUIRE_KEY,  value: "1" }   # fail closed once wired up
+#
+# Stronger still, and the preferred production path: leave the age key out of
+# the container entirely and let a KMS/workload identity decrypt — that is a
+# .sops.yaml change, not an entrypoint change. Or decrypt in an initContainer
+# into an `emptyDir: { medium: Memory }` so the app never holds the key at all.
+#
+# With no ciphertext mounted the entrypoint runs the command unchanged, so this
+# image also works where config arrives as plain environment variables.
+USER 10001:10001
+ENTRYPOINT ["/usr/local/bin/sops-entrypoint.sh"]
+CMD ["/usr/local/bin/happy-wakey-api-server"]
