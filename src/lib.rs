@@ -225,7 +225,10 @@ mod tests {
             "https://user:pass@auth.oresoftware.dev"
         ));
         assert!(is_safe_https_service_url("https://127.0.0.1/"));
+    }
 
+    #[test]
+    fn shared_auth_base_is_https_and_credential_free() {
         assert!(config("https://auth.example.test").validate().is_ok());
         assert!(config("http://auth.example.test").validate().is_err());
         assert!(config("https://user:password@auth.example.test")
