@@ -1,0 +1,103 @@
+[identity]
+service = "happy-wakey-api-server"
+type_name = "RuntimeEnv"
+
+[help]
+url = "https://github.com/flags-2-env/flags-2-env"
+columns = ["options", "env", "type", "default", "description"]
+
+[parse]
+allow_unknown = false
+
+[env]
+ignore = ["DATABASE_URL", "HAPPY_WAKEY_API_TCP_TLS_CERT", "HAPPY_WAKEY_API_TCP_TLS_KEY", "HAPPY_WAKEY_NATS_CREDENTIALS_FILE", "HAPPY_WAKEY_SHARED_AUTH_INTROSPECT_SECRET"]
+
+[flags.help]
+env = "CLI_HELP_REQUESTED"
+long = "help"
+short = "h"
+type = "boolean"
+default = false
+help = "Print command-line help."
+
+[flags.version]
+env = "CLI_VERSION_REQUESTED"
+long = "version"
+short = "V"
+type = "boolean"
+default = false
+help = "Print the server version."
+
+[flags.api-bind]
+env = "HAPPY_WAKEY_API_BIND"
+long = "api-bind"
+type = "string"
+default = "0.0.0.0:8080"
+help = "HTTP API listener socket address."
+
+[flags.shared-auth-base]
+env = "HAPPY_WAKEY_SHARED_AUTH_BASE"
+long = "shared-auth-base"
+type = "string"
+help = "Credential-free Shared Auth base URL."
+
+[flags.shared-auth-audience]
+env = "HAPPY_WAKEY_SHARED_AUTH_AUDIENCE"
+long = "shared-auth-audience"
+type = "string"
+default = "happy-wakey"
+help = "Expected Shared Auth audience."
+
+[flags.nats-url]
+env = "HAPPY_WAKEY_NATS_URL"
+long = "nats-url"
+type = "string"
+help = "Credential-free TLS or exact in-cluster NATS URL."
+
+[flags.nats-request-stream]
+env = "HAPPY_WAKEY_NATS_REQUEST_STREAM"
+long = "nats-request-stream"
+type = "string"
+default = "DD_WEB_API_REQUESTS"
+help = "JetStream request stream."
+
+[flags.nats-response-stream]
+env = "HAPPY_WAKEY_NATS_RESPONSE_STREAM"
+long = "nats-response-stream"
+type = "string"
+default = "HAPPY_WAKEY_RESPONSES"
+help = "JetStream response stream."
+
+[flags.nats-consumer]
+env = "HAPPY_WAKEY_NATS_CONSUMER"
+long = "nats-consumer"
+type = "string"
+default = "dd-web-api-happy-wakey"
+help = "Durable JetStream consumer name."
+
+[flags.tcp-bind]
+env = "HAPPY_WAKEY_API_TCP_BIND"
+long = "tcp-bind"
+type = "string"
+help = "Optional persistent mTLS listener socket address."
+
+[flags.tcp-max-connections]
+env = "HAPPY_WAKEY_API_TCP_MAX_CONNECTIONS"
+long = "tcp-max-connections"
+type = "integer"
+default = 256
+help = "Maximum concurrent mTLS connections."
+
+[flags.tcp-max-requests]
+env = "HAPPY_WAKEY_API_TCP_MAX_REQUESTS_PER_CONNECTION"
+long = "tcp-max-requests"
+type = "integer"
+default = 128
+help = "Maximum requests per persistent connection."
+
+[flags.tcp-idle-timeout-seconds]
+env = "HAPPY_WAKEY_API_TCP_IDLE_TIMEOUT_SECONDS"
+long = "tcp-idle-timeout-seconds"
+type = "integer"
+default = 15
+help = "Persistent connection idle timeout in seconds."

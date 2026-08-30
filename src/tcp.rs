@@ -1,4 +1,4 @@
-use std::{env, fs::File, io::BufReader, path::PathBuf, sync::Arc, time::Duration};
+use std::{fs::File, io::BufReader, path::PathBuf, sync::Arc, time::Duration};
 
 use anyhow::{Context, Result};
 use tokio::{
@@ -196,7 +196,7 @@ fn load_tls_config(config: &TcpServerConfig) -> Result<rustls::ServerConfig> {
 }
 
 fn optional_env(name: &str) -> Option<String> {
-    env::var(name)
+    crate::flags::var(name)
         .ok()
         .map(|value| value.trim().to_owned())
         .filter(|value| !value.is_empty())
