@@ -18,6 +18,12 @@ endpoints using Axum and SeaORM.
 - The service never performs schema migration or DDL at startup.
 - Secrets come from the runtime environment and must never be committed.
 
+The functional core has explicit inputs and outputs: reducers and schedulers
+are pure transformations over immutable values with typed failures. Shared
+Auth, SeaORM, network transports, the clock, and Ores telemetry are effectful
+adapters at the edge. Illegal lifecycle transitions are classified by an
+exhaustive match and cannot bypass the reducer through another transport.
+
 ## Web-to-API interaction modes
 
 The surrounding Happy Wakey system supports four deliberately distinct paths:
@@ -48,6 +54,10 @@ credentials are excluded from the outbox, JetStream payloads, dead-letter
 paths, and ores-otel event fields.
 
 ## Runtime configuration
+
+The process intentionally accepts no command-line options, so it has no second
+argv schema. Runtime values and secrets enter through the environment/SOPS
+boundary only.
 
 | Variable | Required | Purpose |
 | --- | --- | --- |
@@ -98,4 +108,8 @@ source. A lock produced against a workstation-local `file://` registry is
 validation evidence, not a distributable project lock.
 
 The database schema and deployment manifests are release-owned external
-contracts. This repository contains application entities and behavior only.
+contracts. `schema/schema.sql` mirrors the contract for local review only; it
+is never applied by server startup. `scripts/dpm.sh` invokes the pinned
+declarative migration planner and requires an explicit revision acknowledgement.
+Production application remains a reviewed action owned by the ORM/infra release
+and `ORESoftware/k8s-cluster`.

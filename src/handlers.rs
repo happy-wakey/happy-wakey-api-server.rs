@@ -14,8 +14,7 @@ use next_loggers::{json, Map};
 use rust_decimal::prelude::ToPrimitive;
 use sea_orm::{
     sea_query::OnConflict, ActiveModelTrait, ActiveValue::Set, ColumnTrait, ConnectionTrait,
-    DatabaseTransaction, EntityTrait, PaginatorTrait, QueryFilter, QueryOrder, QuerySelect,
-    TransactionTrait,
+    DatabaseTransaction, EntityTrait, QueryFilter, QueryOrder, QuerySelect, TransactionTrait,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -287,7 +286,7 @@ pub async fn pull_changes(
         ));
     }
     let mut rows = sync_change::Entity::find()
-        .filter(sync_change::Column::OwnerId.eq(&identity.subject))
+        .filter(sync_change::Column::Scope.eq(&identity.subject))
         .filter(sync_change::Column::Sequence.gt(cursor))
         .order_by_asc(sync_change::Column::Sequence)
         .limit(Some(query.limit + 1))
@@ -339,10 +338,9 @@ pub async fn push_changes(
         let active = sync_change::ActiveModel {
             sequence: sea_orm::ActiveValue::NotSet,
             change_id: Set(parse_uuid("change_id", &change.change_id)?),
-            owner_id: Set(identity.subject.clone()),
             scope: Set(change.scope.clone()),
             collection: Set(change.collection.clone()),
-            entity_id: Set(change.entity_id.clone()),
+            entity_id: Set(parse_uuid("entity_id", &change.entity_id)?),
             operation: Set(operation_name(change.operation).into()),
             generation: Set(i64::try_from(change.generation)
                 .map_err(|_| ApiFailure::Invalid("generation is too large".into()))?),
@@ -360,9 +358,12 @@ pub async fn push_changes(
             .await?;
     }
     let cursor = sync_change::Entity::find()
-        .filter(sync_change::Column::OwnerId.eq(&identity.subject))
-        .count(&transaction)
-        .await?;
+        .filter(sync_change::Column::Scope.eq(&identity.subject))
+        .order_by_desc(sync_change::Column::Sequence)
+        .one(&transaction)
+        .await?
+        .map(|row| row.sequence)
+        .unwrap_or(0);
     transaction.commit().await?;
     emit(&state, "sync.push", StatusCode::OK, false);
     Ok(Json(SyncEnvelope {
@@ -506,7 +507,7 @@ fn change_contract(model: sync_change::Model) -> Result<SyncChange, ApiFailure> 
         change_id: model.change_id.to_string(),
         scope: model.scope,
         collection: model.collection,
-        entity_id: model.entity_id,
+        entity_id: model.entity_id.to_string(),
         operation: match model.operation.as_str() {
             "upsert" => ChangeOperation::Upsert,
             "delete" => ChangeOperation::Delete,

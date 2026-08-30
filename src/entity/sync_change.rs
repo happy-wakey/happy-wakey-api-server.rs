@@ -6,10 +6,9 @@ pub struct Model {
     #[sea_orm(primary_key)]
     pub sequence: i64,
     pub change_id: Uuid,
-    pub owner_id: String,
     pub scope: String,
     pub collection: String,
-    pub entity_id: String,
+    pub entity_id: Uuid,
     pub operation: String,
     pub generation: i64,
     pub actor_id: String,
