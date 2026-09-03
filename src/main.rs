@@ -37,12 +37,18 @@ async fn main() -> Result<()> {
     let mut services = JoinSet::new();
     let mut http_shutdown = shutdown_rx.clone();
     services.spawn(async move {
-        axum::serve(listener, router(state))
-            .with_graceful_shutdown(async move {
-                let _ = http_shutdown.changed().await;
-            })
-            .await
-            .context("serve Happy Wakey HTTP API")
+        axum::serve(
+            listener,
+            ores_middleware::frameworks::axum::install_from_env(
+                router(state),
+                env!("CARGO_PKG_NAME"),
+            )?,
+        )
+        .with_graceful_shutdown(async move {
+            let _ = http_shutdown.changed().await;
+        })
+        .await
+        .context("serve Happy Wakey HTTP API")
     });
     if let Some(server) = tcp_server {
         services.spawn(server.serve(shutdown_rx.clone()));

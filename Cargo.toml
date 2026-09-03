@@ -8,6 +8,7 @@ license = "MIT"
 repository = "https://github.com/happy-wakey/happy-wakey-api-server.rs"
 
 [dependencies]
+ores-middleware = { git = "https://github.com/ORESoftware/ores-middleware", rev = "a7184454564ef17aa8685fa6393c96b85852056b", features = ["axum"] }
 anyhow = "1"
 async-nats = { version = "0.50", default-features = false, features = ["jetstream", "nkeys", "ring", "server_2_10"] }
 axum = { version = "0.8", features = ["macros"] }
