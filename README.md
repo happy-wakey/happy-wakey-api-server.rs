@@ -33,10 +33,11 @@ The surrounding Happy Wakey system supports four deliberately distinct paths:
    escape hatch.
 2. Stateless HTTPS uses the normal Axum endpoints. Deployments must terminate
    TLS before this service and forward the authorization header unchanged.
-3. Stateful TCP is optional and always uses TLS. It uses bounded four-byte
-   length-delimited frames, bounded connections, an idle timeout, and a request
-   limit. Every frame carries a bearer and is re-introspected; a connection
-   never caches identity.
+3. Stateful TCP is optional and always uses mutual TLS. The API verifies the
+   web-tier client certificate against an explicit CA bundle, then uses bounded
+   four-byte length-delimited frames, bounded connections, an idle timeout, and
+   a request limit. Every frame carries a bearer and is re-introspected; a
+   connection never caches identity.
 4. Async work uses JetStream, not Core NATS request/reply. The client first
    registers an idempotent operation over authenticated HTTPS. The API stores
    only the verified subject and operation in its database outbox. A
@@ -45,6 +46,13 @@ The surrounding Happy Wakey system supports four deliberately distinct paths:
    message ID, waits for the JetStream publish acknowledgement, and only then
    acknowledges the request. Redelivery therefore replays the stored response
    without repeating the database read.
+
+Authenticated WebSockets are the browser/BFF realtime projection of those
+lanes at `/v1/realtime`. Browser upgrades require an exact configured HTTPS
+origin; service-to-service upgrades may omit Origin but still require a bearer.
+The upgrade and every bounded message are authenticated independently, frames
+share the canonical service-operation contract, and idle or overlong sessions
+are closed. Tokens are never accepted in a URL or query parameter.
 
 The application validates the existing streams and durable consumer at
 startup; it does not create or mutate broker topology. Invalid signals and
@@ -55,9 +63,9 @@ paths, and ores-otel event fields.
 
 ## Runtime configuration
 
-The process intentionally accepts no command-line options, so it has no second
-argv schema. Runtime values and secrets enter through the environment/SOPS
-boundary only.
+Public process options are defined once in `.cli-flags.toml` and parsed by the
+canonical `flags-2-env` Rust binding before typed configuration loading.
+Credentials remain environment/SOPS-only and never become argv flags.
 
 | Variable | Required | Purpose |
 | --- | --- | --- |
@@ -66,9 +74,11 @@ boundary only.
 | `HAPPY_WAKEY_API_BIND` | no | Listener address; defaults to `0.0.0.0:8080` |
 | `HAPPY_WAKEY_SHARED_AUTH_BASE` | no | HTTPS Shared Auth base URL |
 | `HAPPY_WAKEY_SHARED_AUTH_AUDIENCE` | no | Required token audience; defaults to `happy-wakey` |
+| `HAPPY_WAKEY_API_WS_ALLOWED_ORIGINS` | no | Exact comma-separated HTTPS browser origins for WebSocket upgrades |
 | `HAPPY_WAKEY_API_TCP_BIND` | no | Enables the persistent TLS listener |
 | `HAPPY_WAKEY_API_TCP_TLS_CERT` | with TCP | PEM certificate chain |
 | `HAPPY_WAKEY_API_TCP_TLS_KEY` | with TCP | PEM private key |
+| `HAPPY_WAKEY_API_TCP_CLIENT_CA_CERT` | with TCP | PEM CA bundle used to verify web-tier client certificates |
 | `HAPPY_WAKEY_API_TCP_MAX_CONNECTIONS` | no | Bounded concurrent connection limit |
 | `HAPPY_WAKEY_API_TCP_MAX_REQUESTS_PER_CONNECTION` | no | Reauthentication/frame limit |
 | `HAPPY_WAKEY_API_TCP_IDLE_TIMEOUT_SECONDS` | no | Per-frame idle timeout |
@@ -80,7 +90,8 @@ boundary only.
 
 Cross-repository Cargo dependencies are immutable. This implementation pins
 `happy-wakey-interfaces` at
-`d6278ec8f6b2263678728b147a32dff92d52d8c8` and ores-otel logging at
+`35b25d5b49cfd469d633914993450c62f25b36b8`, Ores Middleware at
+`6f73bf1ae97f38f05e2e87e4eb3e0e18e0142529`, and ores-otel logging at
 `ca176fb6768a9750d262a536952268625ffd3a8a`. The versioned Shared Auth wire
 contract implemented by the fail-closed HTTPS adapter was finalized in
 `shared-auth-interfaces` at

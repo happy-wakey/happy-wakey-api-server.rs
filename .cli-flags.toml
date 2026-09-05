@@ -35,6 +35,13 @@ type = "string"
 default = "0.0.0.0:8080"
 help = "HTTP API listener socket address."
 
+[flags.websocket-allowed-origins]
+env = "HAPPY_WAKEY_API_WS_ALLOWED_ORIGINS"
+long = "websocket-allowed-origins"
+type = "string"
+default = "https://app.hawky.pro,https://user.hawky.pro,https://org.hawky.pro,https://m.hawky.pro"
+help = "Comma-separated exact HTTPS browser origins allowed to upgrade; originless authenticated service clients remain supported."
+
 [flags.shared-auth-base]
 env = "HAPPY_WAKEY_SHARED_AUTH_BASE"
 long = "shared-auth-base"
@@ -80,6 +87,12 @@ env = "HAPPY_WAKEY_API_TCP_BIND"
 long = "tcp-bind"
 type = "string"
 help = "Optional persistent mTLS listener socket address."
+
+[flags.tcp-client-ca-cert]
+env = "HAPPY_WAKEY_API_TCP_CLIENT_CA_CERT"
+long = "tcp-client-ca-cert"
+type = "string"
+help = "PEM trust bundle used to verify web-tier client certificates; required when persistent TCP is enabled."
 
 [flags.tcp-max-connections]
 env = "HAPPY_WAKEY_API_TCP_MAX_CONNECTIONS"
