@@ -20,6 +20,7 @@ pub struct TcpServerConfig {
     pub bind: String,
     pub certificate_path: PathBuf,
     pub private_key_path: PathBuf,
+    pub client_ca_path: PathBuf,
     pub max_connections: usize,
     pub max_requests_per_connection: usize,
     pub idle_timeout: Duration,
@@ -36,6 +37,7 @@ impl TcpServerConfig {
             bind,
             certificate_path,
             private_key_path,
+            client_ca_path: required_path("HAPPY_WAKEY_API_TCP_CLIENT_CA_CERT")?,
             max_connections: bounded_env(
                 "HAPPY_WAKEY_API_TCP_MAX_CONNECTIONS",
                 DEFAULT_MAX_CONNECTIONS,
@@ -189,8 +191,27 @@ fn load_tls_config(config: &TcpServerConfig) -> Result<rustls::ServerConfig> {
     let private_key = rustls_pemfile::private_key(&mut private_key_reader)
         .context("parse persistent TLS key")?
         .context("TLS private key is missing")?;
+    let mut client_ca_reader = BufReader::new(
+        File::open(&config.client_ca_path).context("open persistent TLS client CA bundle")?,
+    );
+    let client_ca_certificates = rustls_pemfile::certs(&mut client_ca_reader)
+        .collect::<std::io::Result<Vec<_>>>()
+        .context("parse persistent TLS client CA bundle")?;
+    anyhow::ensure!(
+        !client_ca_certificates.is_empty(),
+        "TLS client CA bundle is empty"
+    );
+    let mut client_roots = rustls::RootCertStore::empty();
+    for certificate in client_ca_certificates {
+        client_roots
+            .add(certificate)
+            .context("TLS client CA bundle contains an invalid certificate")?;
+    }
+    let client_verifier = rustls::server::WebPkiClientVerifier::builder(Arc::new(client_roots))
+        .build()
+        .context("build persistent TLS client certificate verifier")?;
     rustls::ServerConfig::builder()
-        .with_no_client_auth()
+        .with_client_cert_verifier(client_verifier)
         .with_single_cert(certificates, private_key)
         .context("certificate and private key do not match")
 }

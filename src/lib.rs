@@ -9,6 +9,7 @@ pub mod operation;
 pub mod reducer;
 pub mod scheduler;
 pub mod tcp;
+pub mod websocket;
 
 use std::sync::Arc;
 
@@ -30,6 +31,7 @@ pub struct Config {
     pub shared_auth_audience: String,
     pub introspect_secret: String,
     pub async_operations_enabled: bool,
+    pub websocket_allowed_origins: Vec<String>,
 }
 
 impl Config {
@@ -48,6 +50,11 @@ impl Config {
             async_operations_enabled: flags::var("HAPPY_WAKEY_NATS_URL")
                 .ok()
                 .is_some_and(|value| !value.trim().is_empty()),
+            websocket_allowed_origins: parse_allowed_origins(
+                &flags::var("HAPPY_WAKEY_API_WS_ALLOWED_ORIGINS").unwrap_or_else(|_| {
+                    "https://app.hawky.pro,https://user.hawky.pro,https://org.hawky.pro,https://m.hawky.pro".into()
+                }),
+            )?,
         })
     }
 
@@ -74,6 +81,7 @@ impl Config {
             shared_auth.query().is_none() && shared_auth.fragment().is_none(),
             "Shared Auth base URL must not contain a query or fragment"
         );
+        validate_middleware_contract()?;
         Ok(())
     }
 }
@@ -104,6 +112,7 @@ pub struct AppState {
     pub auth: auth::SharedAuth,
     pub telemetry: Arc<Logger>,
     pub async_operations_enabled: bool,
+    pub websocket_allowed_origins: Arc<[String]>,
 }
 
 impl AppState {
@@ -125,6 +134,7 @@ impl AppState {
                 ..Options::default()
             })),
             async_operations_enabled: config.async_operations_enabled,
+            websocket_allowed_origins: config.websocket_allowed_origins.clone().into(),
         })
     }
 }
@@ -141,11 +151,52 @@ pub fn router(state: AppState) -> Router {
             post(handlers::transition_occurrence),
         )
         .route("/v1/async-operations", post(async_operations::register))
+        .route("/v1/realtime", get(websocket::upgrade))
         .route("/v1/sync/pull", get(handlers::pull_changes))
         .route("/v1/sync/push", post(handlers::push_changes))
         .layer(request_body_limit())
         .layer(TraceLayer::new_for_http())
         .with_state(state)
+}
+
+fn parse_allowed_origins(raw: &str) -> Result<Vec<String>> {
+    raw.split(',')
+        .map(str::trim)
+        .filter(|origin| !origin.is_empty())
+        .map(|origin| {
+            let url = reqwest::Url::parse(origin).context("WebSocket origin is invalid")?;
+            anyhow::ensure!(
+                url.scheme() == "https"
+                    && url.username().is_empty()
+                    && url.password().is_none()
+                    && url.path() == "/"
+                    && url.query().is_none()
+                    && url.fragment().is_none(),
+                "WebSocket origins must be exact credential-free HTTPS origins"
+            );
+            Ok(origin.trim_end_matches('/').to_owned())
+        })
+        .collect()
+}
+
+fn validate_middleware_contract() -> Result<()> {
+    let capabilities = ores_middleware::capabilities();
+    for required in [
+        "request-context",
+        "trace-context",
+        "payload-limit",
+        "rate-limit",
+        "auth",
+        "idempotency",
+        "tls-policy",
+        "security-headers",
+    ] {
+        anyhow::ensure!(
+            capabilities.contains(&required),
+            "Ores Middleware is missing required capability {required}"
+        );
+    }
+    Ok(())
 }
 
 fn request_body_limit() -> DefaultBodyLimit {
@@ -172,6 +223,7 @@ mod tests {
             shared_auth_audience: "happy-wakey".into(),
             introspect_secret: "test-only-service-secret".into(),
             async_operations_enabled: false,
+            websocket_allowed_origins: vec!["https://app.hawky.pro".into()],
         }
     }
 
@@ -240,5 +292,19 @@ mod tests {
         assert!(config("https://").validate().is_err());
         assert!(config("https://98.90.186.114").validate().is_err());
         assert!(config("https://[2001:db8::1]/").validate().is_err());
+    }
+
+    #[test]
+    fn websocket_origins_and_middleware_fail_closed() {
+        assert_eq!(
+            parse_allowed_origins("https://app.hawky.pro, https://m.hawky.pro/")
+                .unwrap()
+                .len(),
+            2
+        );
+        assert!(parse_allowed_origins("http://app.hawky.pro").is_err());
+        assert!(parse_allowed_origins("https://app.hawky.pro/path").is_err());
+        assert!(parse_allowed_origins("https://user:pass@app.hawky.pro").is_err());
+        validate_middleware_contract().unwrap();
     }
 }

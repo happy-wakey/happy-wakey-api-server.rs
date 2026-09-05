@@ -15,6 +15,7 @@ url = "https://github.com/happy-wakey/happy-wakey-api-server.rs"
 "happy-wakey/happy-wakey-lib-core" = "^0.1.0"
 "happy-wakey/happy-wakey-orm-core" = "^0.1.0"
 "happy-wakey/happy-wakey-interfaces" = "^0.1.0"
+"oresoftware/ores-middleware" = "^0.1.0"
 "oresoftware/next-loggers-rust" = "^0.1.0"
 
 [publish]

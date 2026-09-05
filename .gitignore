@@ -1,4 +1,6 @@
 /target/
+tmp/
+temp/
 /.zed/
 /zed_modules/
 /.zpkg-pack/
