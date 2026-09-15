@@ -10,11 +10,12 @@ columns = ["options", "env", "type", "default", "description"]
 allow_unknown = false
 
 [env]
+load = false
 ignore = ["DATABASE_URL", "HAPPY_WAKEY_API_TCP_TLS_CERT", "HAPPY_WAKEY_API_TCP_TLS_KEY", "HAPPY_WAKEY_NATS_CREDENTIALS_FILE", "HAPPY_WAKEY_SHARED_AUTH_INTROSPECT_SECRET"]
 
 [flags.help]
 env = "CLI_HELP_REQUESTED"
-long = "help"
+aliases = ["help"]
 short = "h"
 type = "boolean"
 default = false
@@ -22,7 +23,7 @@ help = "Print command-line help."
 
 [flags.version]
 env = "CLI_VERSION_REQUESTED"
-long = "version"
+aliases = ["version"]
 short = "V"
 type = "boolean"
 default = false
@@ -30,87 +31,87 @@ help = "Print the server version."
 
 [flags.api-bind]
 env = "HAPPY_WAKEY_API_BIND"
-long = "api-bind"
+aliases = ["api-bind"]
 type = "string"
 default = "0.0.0.0:8080"
 help = "HTTP API listener socket address."
 
 [flags.websocket-allowed-origins]
 env = "HAPPY_WAKEY_API_WS_ALLOWED_ORIGINS"
-long = "websocket-allowed-origins"
+aliases = ["websocket-allowed-origins"]
 type = "string"
 default = "https://app.hawky.pro,https://user.hawky.pro,https://org.hawky.pro,https://m.hawky.pro"
 help = "Comma-separated exact HTTPS browser origins allowed to upgrade; originless authenticated service clients remain supported."
 
 [flags.shared-auth-base]
 env = "HAPPY_WAKEY_SHARED_AUTH_BASE"
-long = "shared-auth-base"
+aliases = ["shared-auth-base"]
 type = "string"
 help = "Credential-free Shared Auth base URL."
 
 [flags.shared-auth-audience]
 env = "HAPPY_WAKEY_SHARED_AUTH_AUDIENCE"
-long = "shared-auth-audience"
+aliases = ["shared-auth-audience"]
 type = "string"
 default = "happy-wakey"
 help = "Expected Shared Auth audience."
 
 [flags.nats-url]
 env = "HAPPY_WAKEY_NATS_URL"
-long = "nats-url"
+aliases = ["nats-url"]
 type = "string"
 help = "Credential-free TLS or exact in-cluster NATS URL."
 
 [flags.nats-request-stream]
 env = "HAPPY_WAKEY_NATS_REQUEST_STREAM"
-long = "nats-request-stream"
+aliases = ["nats-request-stream"]
 type = "string"
 default = "DD_WEB_API_REQUESTS"
 help = "JetStream request stream."
 
 [flags.nats-response-stream]
 env = "HAPPY_WAKEY_NATS_RESPONSE_STREAM"
-long = "nats-response-stream"
+aliases = ["nats-response-stream"]
 type = "string"
 default = "HAPPY_WAKEY_RESPONSES"
 help = "JetStream response stream."
 
 [flags.nats-consumer]
 env = "HAPPY_WAKEY_NATS_CONSUMER"
-long = "nats-consumer"
+aliases = ["nats-consumer"]
 type = "string"
 default = "dd-web-api-happy-wakey"
 help = "Durable JetStream consumer name."
 
 [flags.tcp-bind]
 env = "HAPPY_WAKEY_API_TCP_BIND"
-long = "tcp-bind"
+aliases = ["tcp-bind"]
 type = "string"
 help = "Optional persistent mTLS listener socket address."
 
 [flags.tcp-client-ca-cert]
 env = "HAPPY_WAKEY_API_TCP_CLIENT_CA_CERT"
-long = "tcp-client-ca-cert"
+aliases = ["tcp-client-ca-cert"]
 type = "string"
 help = "PEM trust bundle used to verify web-tier client certificates; required when persistent TCP is enabled."
 
 [flags.tcp-max-connections]
 env = "HAPPY_WAKEY_API_TCP_MAX_CONNECTIONS"
-long = "tcp-max-connections"
+aliases = ["tcp-max-connections"]
 type = "integer"
 default = 256
 help = "Maximum concurrent mTLS connections."
 
 [flags.tcp-max-requests]
 env = "HAPPY_WAKEY_API_TCP_MAX_REQUESTS_PER_CONNECTION"
-long = "tcp-max-requests"
+aliases = ["tcp-max-requests"]
 type = "integer"
 default = 128
 help = "Maximum requests per persistent connection."
 
 [flags.tcp-idle-timeout-seconds]
 env = "HAPPY_WAKEY_API_TCP_IDLE_TIMEOUT_SECONDS"
-long = "tcp-idle-timeout-seconds"
+aliases = ["tcp-idle-timeout-seconds"]
 type = "integer"
 default = 15
 help = "Persistent connection idle timeout in seconds."
